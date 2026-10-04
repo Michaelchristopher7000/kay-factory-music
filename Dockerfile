@@ -28,6 +28,9 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 # Install PHP dependencies
 RUN composer install --no-dev --optimize-autoloader --no-interaction
 
+# Clear Laravel cached configuration
+RUN php artisan config:clear
+
 # Install JavaScript dependencies and build React/Vite
 RUN npm ci && npm run build
 
