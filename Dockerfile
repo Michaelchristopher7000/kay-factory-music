@@ -42,4 +42,5 @@ RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cac
 
 EXPOSE 80
 
-CMD ["apache2-foreground"]
+# Temporary diagnostic: show the DB username Laravel sees
+CMD ["sh", "-c", "php artisan config:clear && php artisan tinker --execute=\"dump(env('DB_USERNAME')); dump(config('database.connections.pgsql.username'));\" && apache2-foreground"]
