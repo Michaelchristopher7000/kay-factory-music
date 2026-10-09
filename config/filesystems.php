@@ -1,3 +1,4 @@
+
 <?php
 
 return [
@@ -9,7 +10,7 @@ return [
     |
     | Here you may specify the default filesystem disk that should be used
     | by the framework. The "local" disk, as well as a variety of cloud
-    | based disks are available to your application for file storage.
+    | based disks are available to your application.
     |
     */
 
@@ -20,11 +21,8 @@ return [
     | Filesystem Disks
     |--------------------------------------------------------------------------
     |
-    | Below you may configure as many filesystem disks as necessary, and you
-    | may even configure multiple disks for the same driver. Examples for
-    | most supported storage drivers are configured here for reference.
-    |
-    | Supported drivers: "local", "ftp", "sftp", "s3"
+    | Configure your filesystem disks here. You may configure multiple
+    | disks for the same driver.
     |
     */
 
@@ -41,7 +39,7 @@ return [
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
-            'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
+            'url' => rtrim(env('APP_URL', 'http://localhost'), '/') . '/storage',
             'visibility' => 'public',
             'throw' => false,
             'report' => false,
@@ -60,17 +58,32 @@ return [
             'report' => false,
         ],
 
+        /*
+        |--------------------------------------------------------------------------
+        | Supabase Storage
+        |--------------------------------------------------------------------------
+        */
+
+        'supabase' => [
+            'driver' => 's3',
+            'key' => env('SUPABASE_S3_ACCESS_KEY'),
+            'secret' => env('SUPABASE_S3_SECRET_KEY'),
+            'region' => env('SUPABASE_S3_REGION', 'eu-west-1'),
+            'bucket' => env('SUPABASE_S3_BUCKET', 'kfm-media'),
+            'endpoint' => env('SUPABASE_S3_ENDPOINT'),
+            'use_path_style_endpoint' => true,
+            'throw' => true,
+
+            // Used by ArtistResource to generate public image URLs.
+            'public_url' => env('SUPABASE_PUBLIC_URL'),
+        ],
+
     ],
 
     /*
     |--------------------------------------------------------------------------
     | Symbolic Links
     |--------------------------------------------------------------------------
-    |
-    | Here you may configure the symbolic links that will be created when the
-    | `storage:link` Artisan command is executed. The array keys should be
-    | the locations of the links and the values should be their targets.
-    |
     */
 
     'links' => [
