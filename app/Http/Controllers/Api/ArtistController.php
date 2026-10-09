@@ -15,6 +15,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 
 class ArtistController extends Controller
@@ -41,38 +42,60 @@ class ArtistController extends Controller
     {
         Gate::authorize('create', Artist::class);
 
-        return DB::transaction(function () use ($request) {
+        // Create and save the artist before attempting notifications.
+        $artist = DB::transaction(function () use ($request) {
             $data = $request->validated();
             $data['created_by'] = $request->user()->id;
 
-            // Generate artist_code if not provided
+            // Generate artist_code if not provided.
             if (empty($data['artist_code'])) {
-                $lastArtist = Artist::lockForUpdate()->orderBy('id', 'desc')->first();
+                $lastArtist = Artist::lockForUpdate()
+                    ->orderBy('id', 'desc')
+                    ->first();
+
                 $nextId = $lastArtist ? $lastArtist->id + 1 : 1;
-                $data['artist_code'] = 'KFM-ART-' . str_pad($nextId, 4, '0', STR_PAD_LEFT);
+
+                $data['artist_code'] = 'KFM-ART-' .
+                    str_pad($nextId, 4, '0', STR_PAD_LEFT);
             }
 
-            $artist = Artist::create($data);
+            return Artist::create($data);
+        });
 
-            // --- NOTIFICATION LOGIC START ---
-
-            // 1. Find Super Admin role by slug
+        // Notify Super Admins. Notification errors must not undo artist creation.
+        try {
             $superAdminRole = Role::where('slug', 'super-admin')->first();
 
             if ($superAdminRole) {
-                $superAdmins = User::where('role_id', $superAdminRole->id)->get();
+                $superAdmins = User::where(
+                    'role_id',
+                    $superAdminRole->id
+                )->get();
 
                 if ($superAdmins->isNotEmpty()) {
-                    Notification::send($superAdmins, new ArtistCreatedNotification(
-                        $artist->id,
-                        $artist->artist_code,
-                        $artist->name
-                    ));
+                    Notification::send(
+                        $superAdmins,
+                        new ArtistCreatedNotification(
+                            $artist->id,
+                            $artist->artist_code,
+                            $artist->name
+                        )
+                    );
                 }
             }
+        } catch (\Throwable $e) {
+            Log::error(
+                'Artist created, but Super Admin notification failed.',
+                [
+                    'artist_id' => $artist->id,
+                    'error' => $e->getMessage(),
+                ]
+            );
+        }
 
-            // 2. Notify the assigned Manager (if one was selected)
-            if (!empty($artist->manager_id)) {
+        // Notify the assigned manager separately.
+        if (!empty($artist->manager_id)) {
+            try {
                 $manager = User::find($artist->manager_id);
 
                 if ($manager) {
@@ -82,16 +105,26 @@ class ArtistController extends Controller
                         $artist->name
                     ));
                 }
+            } catch (\Throwable $e) {
+                Log::error(
+                    'Artist created, but manager notification failed.',
+                    [
+                        'artist_id' => $artist->id,
+                        'manager_id' => $artist->manager_id,
+                        'error' => $e->getMessage(),
+                    ]
+                );
             }
+        }
 
-            // --- NOTIFICATION LOGIC END ---
+        $artist->load([
+            'manager:id,name,email',
+            'createdBy:id,name,email',
+        ]);
 
-            $artist->load(['manager:id,name,email', 'createdBy:id,name,email']);
-
-            return (new ArtistResource($artist))
-                ->response()
-                ->setStatusCode(201);
-        });
+        return (new ArtistResource($artist))
+            ->response()
+            ->setStatusCode(201);
     }
 
     public function show(Artist $artist): ArtistResource
@@ -103,11 +136,14 @@ class ArtistController extends Controller
         return new ArtistResource($artist);
     }
 
-    public function update(UpdateArtistRequest $request, Artist $artist): ArtistResource
-    {
+    public function update(
+        UpdateArtistRequest $request,
+        Artist $artist
+    ): ArtistResource {
         Gate::authorize('update', $artist);
 
         $artist->update($request->validated());
+
         $artist->load(['manager:id,name,email', 'createdBy:id,name,email']);
 
         return new ArtistResource($artist);
