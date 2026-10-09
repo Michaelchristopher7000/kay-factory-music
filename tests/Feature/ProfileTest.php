@@ -24,7 +24,10 @@ class ProfileTest extends TestCase
     protected function userWithRole(string $slug): User
     {
         $role = Role::where('slug', $slug)->firstOrFail();
-        return User::factory()->create(['role_id' => $role->id]);
+
+        return User::factory()->create([
+            'role_id' => $role->id,
+        ]);
     }
 
     // =============================================================
@@ -45,7 +48,8 @@ class ProfileTest extends TestCase
 
     public function test_unauthenticated_cannot_update_profile(): void
     {
-        $this->patchJson('/api/me', ['name' => 'X'])->assertStatus(401);
+        $this->patchJson('/api/me', ['name' => 'X'])
+            ->assertStatus(401);
     }
 
     public function test_name_validation(): void
@@ -53,7 +57,9 @@ class ProfileTest extends TestCase
         $user = $this->userWithRole('general-staff');
         Sanctum::actingAs($user);
 
-        $this->patchJson('/api/me', ['name' => str_repeat('a', 300)])
+        $this->patchJson('/api/me', [
+            'name' => str_repeat('a', 300),
+        ])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['name']);
     }
@@ -74,7 +80,10 @@ class ProfileTest extends TestCase
             ->assertStatus(200)
             ->assertJsonPath('data.email', 'newemail@example.com');
 
-        $this->assertEquals('newemail@example.com', $user->fresh()->email);
+        $this->assertEquals(
+            'newemail@example.com',
+            $user->fresh()->email
+        );
     }
 
     public function test_changing_email_requires_current_password(): void
@@ -82,7 +91,9 @@ class ProfileTest extends TestCase
         $user = $this->userWithRole('general-staff');
         Sanctum::actingAs($user);
 
-        $this->patchJson('/api/me', ['email' => 'new@example.com'])
+        $this->patchJson('/api/me', [
+            'email' => 'new@example.com',
+        ])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['current_password']);
     }
@@ -133,7 +144,7 @@ class ProfileTest extends TestCase
 
     public function test_user_can_upload_avatar(): void
     {
-        Storage::fake('public');
+        Storage::fake('supabase');
 
         $user = $this->userWithRole('general-staff');
         Sanctum::actingAs($user);
@@ -145,57 +156,74 @@ class ProfileTest extends TestCase
         ])->assertStatus(200);
 
         $user->refresh();
+
         $this->assertNotNull($user->avatar);
-        Storage::disk('public')->assertExists($user->avatar);
-        $this->assertStringContainsString('/storage/', $response->json('user.avatar_url'));
+
+        Storage::disk('supabase')->assertExists($user->avatar);
+
+        $this->assertStringContainsString(
+            '/storage/v1/object/public/',
+            $response->json('user.avatar_url')
+        );
     }
 
     public function test_invalid_file_type_is_rejected(): void
     {
-        Storage::fake('public');
+        Storage::fake('supabase');
 
         $user = $this->userWithRole('general-staff');
         Sanctum::actingAs($user);
 
-        $file = UploadedFile::fake()->create('doc.pdf', 100, 'application/pdf');
+        $file = UploadedFile::fake()->create(
+            'doc.pdf',
+            100,
+            'application/pdf'
+        );
 
-        $this->postJson('/api/me/avatar', ['avatar' => $file])
+        $this->postJson('/api/me/avatar', [
+            'avatar' => $file,
+        ])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['avatar']);
     }
 
     public function test_oversized_avatar_is_rejected(): void
     {
-        Storage::fake('public');
+        Storage::fake('supabase');
 
         $user = $this->userWithRole('general-staff');
         Sanctum::actingAs($user);
 
-        // 3 MB > 2 MB limit
-        $file = UploadedFile::fake()->image('big.jpg')->size(3000);
+        // 3 MB exceeds the 2 MB limit.
+        $file = UploadedFile::fake()
+            ->image('big.jpg')
+            ->size(3000);
 
-        $this->postJson('/api/me/avatar', ['avatar' => $file])
+        $this->postJson('/api/me/avatar', [
+            'avatar' => $file,
+        ])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['avatar']);
     }
 
     public function test_avatar_replacement_removes_old_file(): void
     {
-        Storage::fake('public');
+        Storage::fake('supabase');
 
         $user = $this->userWithRole('general-staff');
         Sanctum::actingAs($user);
 
-        // First upload
+        // First upload.
         $this->postJson('/api/me/avatar', [
             'avatar' => UploadedFile::fake()->image('first.jpg'),
         ])->assertStatus(200);
 
         $user->refresh();
         $firstPath = $user->avatar;
-        Storage::disk('public')->assertExists($firstPath);
 
-        // Replace
+        Storage::disk('supabase')->assertExists($firstPath);
+
+        // Replace the first avatar.
         $this->postJson('/api/me/avatar', [
             'avatar' => UploadedFile::fake()->image('second.jpg'),
         ])->assertStatus(200);
@@ -204,8 +232,9 @@ class ProfileTest extends TestCase
         $secondPath = $user->avatar;
 
         $this->assertNotEquals($firstPath, $secondPath);
-        Storage::disk('public')->assertMissing($firstPath);
-        Storage::disk('public')->assertExists($secondPath);
+
+        Storage::disk('supabase')->assertMissing($firstPath);
+        Storage::disk('supabase')->assertExists($secondPath);
     }
 
     // =============================================================
@@ -214,7 +243,7 @@ class ProfileTest extends TestCase
 
     public function test_user_can_remove_avatar(): void
     {
-        Storage::fake('public');
+        Storage::fake('supabase');
 
         $user = $this->userWithRole('general-staff');
         Sanctum::actingAs($user);
@@ -225,13 +254,17 @@ class ProfileTest extends TestCase
 
         $user->refresh();
         $path = $user->avatar;
-        $this->assertNotNull($path);
 
-        $this->deleteJson('/api/me/avatar')->assertStatus(200);
+        $this->assertNotNull($path);
+        Storage::disk('supabase')->assertExists($path);
+
+        $this->deleteJson('/api/me/avatar')
+            ->assertStatus(200);
 
         $user->refresh();
+
         $this->assertNull($user->avatar);
-        Storage::disk('public')->assertMissing($path);
+        Storage::disk('supabase')->assertMissing($path);
     }
 
     public function test_removing_avatar_when_none_exists_is_safe(): void
@@ -239,7 +272,9 @@ class ProfileTest extends TestCase
         $user = $this->userWithRole('general-staff');
         Sanctum::actingAs($user);
 
-        $this->deleteJson('/api/me/avatar')->assertStatus(200);
+        $this->deleteJson('/api/me/avatar')
+            ->assertStatus(200);
+
         $this->assertNull($user->fresh()->avatar);
     }
 
@@ -251,12 +286,15 @@ class ProfileTest extends TestCase
     {
         $other = $this->userWithRole('general-staff');
         $user = $this->userWithRole('general-staff');
+
         Sanctum::actingAs($user);
 
-        // The endpoint has no user-id parameter — the other user's data is untouched
+        // The endpoint has no user-ID parameter.
         $originalName = $other->name;
 
-        $this->patchJson('/api/me', ['name' => 'Hacker'])->assertStatus(200);
+        $this->patchJson('/api/me', [
+            'name' => 'Hacker',
+        ])->assertStatus(200);
 
         $this->assertEquals($originalName, $other->fresh()->name);
         $this->assertEquals('Hacker', $user->fresh()->name);
@@ -271,7 +309,9 @@ class ProfileTest extends TestCase
         $user = $this->userWithRole('general-staff');
         Sanctum::actingAs($user);
 
-        $this->patchJson('/api/me', ['name' => 'Audited Name'])->assertStatus(200);
+        $this->patchJson('/api/me', [
+            'name' => 'Audited Name',
+        ])->assertStatus(200);
 
         $this->assertDatabaseHas('audit_logs', [
             'action' => 'profile_updated',
@@ -279,15 +319,26 @@ class ProfileTest extends TestCase
             'model_id' => $user->id,
         ]);
 
-        $log = AuditLog::where('action', 'profile_updated')->latest('id')->first();
+        $log = AuditLog::where('action', 'profile_updated')
+            ->latest('id')
+            ->first();
+
         $this->assertNotNull($log);
-        $this->assertEquals('Audited Name', $log->changes['after']['name'] ?? null);
-        $this->assertArrayNotHasKey('password', $log->changes['after'] ?? []);
+
+        $this->assertEquals(
+            'Audited Name',
+            $log->changes['after']['name'] ?? null
+        );
+
+        $this->assertArrayNotHasKey(
+            'password',
+            $log->changes['after'] ?? []
+        );
     }
 
     public function test_avatar_upload_creates_audit_entry(): void
     {
-        Storage::fake('public');
+        Storage::fake('supabase');
 
         $user = $this->userWithRole('general-staff');
         Sanctum::actingAs($user);
@@ -304,16 +355,17 @@ class ProfileTest extends TestCase
 
     public function test_avatar_removal_creates_audit_entry(): void
     {
-        Storage::fake('public');
+        Storage::fake('supabase');
 
         $user = $this->userWithRole('general-staff');
         Sanctum::actingAs($user);
 
         $this->postJson('/api/me/avatar', [
             'avatar' => UploadedFile::fake()->image('a.jpg'),
-        ]);
+        ])->assertStatus(200);
 
-        $this->deleteJson('/api/me/avatar')->assertStatus(200);
+        $this->deleteJson('/api/me/avatar')
+            ->assertStatus(200);
 
         $this->assertDatabaseHas('audit_logs', [
             'action' => 'avatar_removed',
@@ -332,7 +384,10 @@ class ProfileTest extends TestCase
         ])->assertStatus(200);
 
         $logs = AuditLog::all();
-        $raw = $logs->pluck('changes')->map(fn ($c) => json_encode($c))->implode(' ');
+
+        $raw = $logs->pluck('changes')
+            ->map(fn ($changes) => json_encode($changes))
+            ->implode(' ');
 
         $this->assertStringNotContainsString('"current_password"', $raw);
         $this->assertStringNotContainsString('"password"', $raw);

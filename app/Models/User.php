@@ -41,6 +41,9 @@ class User extends Authenticatable
         ];
     }
 
+    /**
+     * Return the correct URL for the user's avatar.
+     */
     protected function avatarUrl(): Attribute
     {
         return Attribute::make(
@@ -49,10 +52,35 @@ class User extends Authenticatable
                     return null;
                 }
 
-                if (preg_match('#^https?://#i', $this->avatar)) {
+                // Keep existing full URLs working.
+                if (filter_var($this->avatar, FILTER_VALIDATE_URL)) {
                     return $this->avatar;
                 }
 
+                // Build the public Supabase URL for staff avatars.
+                if (str_starts_with($this->avatar, 'avatars/')) {
+                    $baseUrl = rtrim(
+                        config('filesystems.disks.supabase.public_url', ''),
+                        '/'
+                    );
+
+                    $bucket = config(
+                        'filesystems.disks.supabase.bucket',
+                        'kfm-media'
+                    );
+
+                    if ($baseUrl !== '') {
+                        return $baseUrl
+                            . '/storage/v1/object/public/'
+                            . $bucket
+                            . '/'
+                            . $this->avatar;
+                    }
+
+                    return null;
+                }
+
+                // Preserve support for older locally stored avatars.
                 return Storage::disk('public')->url($this->avatar);
             }
         );
@@ -73,10 +101,6 @@ class User extends Authenticatable
         return $this->hasRole('super-admin');
     }
 
-    /**
-     * True only when 2FA has been fully set up AND verified.
-     * An unconfirmed setup is not treated as active.
-     */
     public function hasTwoFactorEnabled(): bool
     {
         return $this->two_factor_secret !== null
@@ -88,9 +112,6 @@ class User extends Authenticatable
         return $this->name . ' (' . $this->email . ')';
     }
 
-    /**
-     * Use the branded Kay Factory Music password reset email.
-     */
     public function sendPasswordResetNotification($token): void
     {
         $this->notify(new ResetPasswordNotification($token));
